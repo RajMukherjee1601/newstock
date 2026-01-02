@@ -1,7 +1,6 @@
-Flask~=3.0.3
-flask-cors~=4.0.1
-yfinance~=0.2.40
-pandas~=2.2.2
-numpy~=1.26.4
-holidays~=0.56
-gunicorn~=22.0.0
+flask~=3.1.2
+flask-cors
+yfinance~=0.2.65
+pandas~=2.3.2
+numpy~=2.3.2
+gunicorn
