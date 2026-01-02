@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BSE Forecast Dashboard (Flask + Graphs + Tables + Accuracy)</title>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    :root { --bg:#0b1220; --card:#111a2e; --txt:#e7ecff; --muted:#aab4d6; --border:#223055; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: linear-gradient(180deg, #071022 0%, #0b1220 100%);
+      color: var(--txt);
+    }
+    .wrap { max-width: 1150px; margin: 24px auto; padding: 0 16px; }
+    .header { display:flex; gap:16px; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; }
+    h1 { font-size: 20px; margin:0; }
+    .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+    .card {
+      background: rgba(17,26,46,0.85);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 14px 10px;
+      margin-top: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.25);
+    }
+    .controls { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+    label { font-size: 12px; color: var(--muted); display:block; margin-bottom:6px; }
+    input, select, button {
+      background: #0f1930; color: var(--txt);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 12px; font-size: 14px; outline:none;
+    }
+    select { min-width: 240px; }
+    button { cursor:pointer; }
+    button:hover { filter: brightness(1.06); }
+
+    .row { display:grid; grid-template-columns: 1.2fr 0.8fr; gap:14px; }
+    @media (max-width: 920px) { .row { grid-template-columns: 1fr; } }
+
+    .meta { color: var(--muted); font-size: 13px; line-height:1.4; }
+    .pill {
+      display:inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border:1px solid var(--border);
+      background:#0f1930;
+      margin: 6px 8px 0 0;
+    }
+    .warn { color: #ffd1a8; white-space: pre-wrap; }
+    .err { color: #ffb3b3; white-space: pre-wrap; }
+
+    canvas { width: 100% !important; height: 420px !important; }
+    .small canvas { height: 280px !important; }
+
+    .footer { color: var(--muted); font-size: 12px; margin: 14px 2px 24px; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; padding:2px 6px; border:1px solid var(--border); border-radius:6px; background:#0f1930;}
+
+    /* ---------- TABLE STYLES ---------- */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      overflow: hidden;
+      border-radius: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid rgba(34,48,85,.6);
+      padding: 10px 10px;
+      font-size: 13px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    th {
+      text-align: right;
+      color: #e7ecff;
+      background: rgba(15,25,48,0.85);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td:first-child, th:first-child { text-align: left; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+
+    .table-wrap {
+      max-height: 380px;
+      overflow: auto;
+      border: 1px solid rgba(34,48,85,.6);
+      border-radius: 12px;
+      margin-top: 10px;
+    }
+
+    .actual-input{
+      width: 120px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(34,48,85,.9);
+      background: #0f1930;
+      color: var(--txt);
+      text-align: right;
+    }
+
+    .btn-small{
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0f1930;
+      color: var(--txt);
+    }
+
+    .ok { color: #b6f2c2; }
+    .bad { color: #ffb3b3; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h1>BSE Forecast Dashboard (Flask + Graphs + Tables + Accuracy)</h1>
+        <div class="sub">
+          Adds an <b>Actual Close</b> input column so you can compute <b>Error</b> and <b>Accuracy%</b>.
+          Actuals are saved in your browser (localStorage).
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="controls">
+        <div>
+          <label>Endpoint</label>
+          <select id="endpoint">
+            <option value="/forecast/default">/forecast/default (GET)</option>
+            <option value="/forecast">/forecast (POST)</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Stock</label>
+          <select id="stockSelect" disabled>
+            <option>Loading…</option>
+          </select>
+        </div>
+
+        <div>
+          <label>&nbsp;</label>
+          <button id="loadBtn">Load Forecast</button>
+        </div>
+
+        <div>
+          <label>&nbsp;</label>
+          <button class="btn-small" id="clearActualsBtn">Clear Saved Actuals</button>
+        </div>
+      </div>
+
+      <div id="status" class="meta" style="margin-top:10px;"></div>
+      <div id="warnings" class="meta warn" style="margin-top:6px;"></div>
+      <div id="error" class="err" style="margin-top:10px;"></div>
+    </div>
+
+    <div >
+      <!-- LEFT: Main chart + selected stock table -->
+      <div class="card">
+        <div class="controls" id="stockMeta"></div>
+
+        <div style="margin-top:10px;">
+          <canvas id="forecastChart"></canvas>
+        </div>
+
+        <div class="meta" style="margin-top:14px;"><b>Selected Stock – Forecast Table</b></div>
+        <div class="meta" style="margin-top:6px;">
+          Enter <b>Actual Close</b> after the trading day ends. Accuracy% is calculated as:
+          <span class="kbd">100 − |PredMedian − Actual| / Actual × 100</span>
+        </div>
+
+        <div class="table-wrap">
+          <table id="forecastTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Median</th>
+                <th>Mean</th>
+                <th>Low 68%</th>
+                <th>High 68%</th>
+                <th>Low 95%</th>
+                <th>High 95%</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- RIGHT: bar chart -->
+    </div>
+
+    <!-- SUMMARY TABLE -->
+    <div class="card">
+      <div class="meta"><b>All Stocks – Summary</b></div>
+      <div class="meta" style="margin-top:6px;">
+        Shows Day7 median vs last close and an average Accuracy% (only if you entered actuals).
+      </div>
+      <div class="table-wrap">
+        <table id="summaryTable">
+          <thead>
+            <tr>
+              <th>Stock</th>
+              <th>Ticker</th>
+              <th>Last Close</th>
+              <th>Day 7 Median</th>
+              <th>% Change (Day7 vs Last)</th>
+              <th>Avg Accuracy% (from entered actuals)</th>
+              <th>Method</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footer">
+      Open this page from Flask (recommended): <span class="kbd">http://127.0.0.1:5000/</span>.
+      We use <b>relative URLs</b> (same-origin) so fetch doesn’t get blocked.
+    </div>
+  </div>
+
+<script>
+  // -------------------------
+  // State + elements
+  // -------------------------
+  let forecastData = null;
+  let currentKey = null;
+  let forecastChart = null;
+  let moveChart = null;
+
+  const STORAGE_KEY = "bse_actuals_v1"; // { "UPL.BO": { "2026-01-02": 812.5, ... }, ... }
+
+  const els = {
+    endpoint: document.getElementById("endpoint"),
+    stockSelect: document.getElementById("stockSelect"),
+    loadBtn: document.getElementById("loadBtn"),
+    clearActualsBtn: document.getElementById("clearActualsBtn"),
+    status: document.getElementById("status"),
+    warnings: document.getElementById("warnings"),
+    error: document.getElementById("error"),
+    stockMeta: document.getElementById("stockMeta"),
+  };
+
+  function setStatus(msg) { els.status.textContent = msg || ""; }
+  function setWarnings(msg) { els.warnings.textContent = msg || ""; }
+  function setError(msg) { els.error.textContent = msg || ""; }
+
+  function formatINR(x) {
+    if (x == null || isNaN(x)) return "—";
+    try {
+      return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(x);
+    } catch (e) {
+      return String(x);
+    }
+  }
+
+  function toNum(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  // -------------------------
+  // Actuals storage helpers
+  // -------------------------
+  function loadActuals(){
+    try{
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    }catch(e){
+      return {};
+    }
+  }
+
+  function saveActuals(obj){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+  }
+
+  function setActual(ticker, dateStr, value){
+    const all = loadActuals();
+    if (!all[ticker]) all[ticker] = {};
+    if (value == null) {
+      delete all[ticker][dateStr];
+    } else {
+      all[ticker][dateStr] = value;
+    }
+    saveActuals(all);
+  }
+
+  function getActual(ticker, dateStr){
+    const all = loadActuals();
+    return all?.[ticker]?.[dateStr] ?? null;
+  }
+
+  // -------------------------
+  // Fetch
+  // -------------------------
+  async function fetchForecast() {
+    setError("");
+    setWarnings("");
+    setStatus("Fetching forecast…");
+
+    const ep = els.endpoint.value;
+    let url = ep;
+    let opts = { method: "GET", headers: { "Accept": "application/json" } };
+
+    if (ep === "/forecast") {
+      opts.method = "POST";
+      opts.headers["Content-Type"] = "application/json";
+      opts.body = JSON.stringify({});
+    }
+
+    const res = await fetch(url, opts);
+    const json = await res.json().catch(()=> ({}));
+    if (!res.ok) throw new Error(json?.error || ("HTTP " + res.status));
+    return json;
+  }
+
+  // -------------------------
+  // Charts
+  // -------------------------
+  function destroyChart(ch) { if (ch) ch.destroy(); return null; }
+
+  function buildForecastChart(ctx, labels, series) {
+    return new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "High 95%", data: series.high95, borderWidth: 0, pointRadius: 0 },
+          { label: "Low 95%",  data: series.low95,  borderWidth: 0, pointRadius: 0, fill: "-1" },
+          { label: "High 68%", data: series.high68, borderWidth: 0, pointRadius: 0 },
+          { label: "Low 68%",  data: series.low68,  borderWidth: 0, pointRadius: 0, fill: "-1" },
+          { label: "Median", data: series.median, borderWidth: 2, pointRadius: 2 },
+          { label: "Mean",   data: series.mean,   borderWidth: 2, pointRadius: 2 },
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { labels: { color: "#e7ecff" } },
+          tooltip: {
+            callbacks: { label: (ctx) => `${ctx.dataset.label}: ₹${formatINR(ctx.parsed.y)}` }
+          }
+        },
+        scales: {
+          x: { ticks: { color: "#aab4d6" }, grid: { color: "rgba(34,48,85,.35)" } },
+          y: {
+            ticks: { color: "#aab4d6", callback: (v) => "₹" + formatINR(v) },
+            grid: { color: "rgba(34,48,85,.35)" }
+          }
+        },
+        elements: { line: { tension: 0.25 } }
+      }
+    });
+  }
+
+  function buildMoveChart(ctx, stockNames, pctMoves) {
+    return new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: stockNames,
+        datasets: [{ label: "Median % move (Day 7 vs last close)", data: pctMoves }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { labels: { color: "#e7ecff" } },
+          tooltip: { callbacks: { label: (ctx) => `${ctx.parsed.y.toFixed(2)}%` } }
+        },
+        scales: {
+          x: { ticks: { color: "#aab4d6" }, grid: { color: "rgba(34,48,85,.35)" } },
+          y: { ticks: { color: "#aab4d6", callback: (v)=> v + "%" }, grid: { color: "rgba(34,48,85,.35)" } }
+        }
+      }
+    });
+  }
+
+  // -------------------------
+  // Tables
+  // -------------------------
+  function computeErrorAndAccuracy(predMedian, actual){
+    if (actual == null || actual === 0 || predMedian == null) return { err: null, acc: null };
+    const err = predMedian - actual;
+    const acc = 100 - (Math.abs(err) / actual) * 100;
+    return { err, acc };
+  }
+
+  function renderForecastTable(stockKey, stockObj) {
+    const tbody = document.querySelector("#forecastTable tbody");
+    tbody.innerHTML = "";
+
+    const ticker = stockObj.ticker || stockKey;
+    const rows = stockObj.forecast || [];
+
+    rows.forEach(r => {
+      const actual = getActual(ticker, r.date);
+      const predMedian = toNum(r.pred_close_median);
+      const { err, acc } = computeErrorAndAccuracy(predMedian, actual);
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${r.date}</td>
+        <td>₹${formatINR(r.pred_close_median)}</td>
+        <td>₹${formatINR(r.pred_close_mean)}</td>
+        <td>₹${formatINR(r.low_68)}</td>
+        <td>₹${formatINR(r.high_68)}</td>
+        <td>₹${formatINR(r.low_95)}</td>
+        <td>₹${formatINR(r.high_95)}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+
+    // bind input events
+    tbody.querySelectorAll("input.actual-input").forEach(inp => {
+      inp.addEventListener("input", (e) => {
+        const t = e.target.dataset.ticker;
+        const d = e.target.dataset.date;
+        const v = toNum(e.target.value);
+        setActual(t, d, v);
+        // re-render tables and summary for live update
+        renderSelected();
+      });
+    });
+  }
+
+  function avgAccuracyForStock(ticker, forecastRows){
+    const accs = [];
+    forecastRows.forEach(r => {
+      const actual = getActual(ticker, r.date);
+      const predMedian = toNum(r.pred_close_median);
+      const { acc } = computeErrorAndAccuracy(predMedian, actual);
+      if (acc != null && Number.isFinite(acc)) accs.push(acc);
+    });
+    if (!accs.length) return null;
+    return accs.reduce((a,b)=>a+b,0) / accs.length;
+  }
+
+  function renderSummaryTable(allResults) {
+    const tbody = document.querySelector("#summaryTable tbody");
+    tbody.innerHTML = "";
+
+    const names = Object.keys(allResults);
+    names.forEach(name => {
+      const o = allResults[name];
+      const rows = o.forecast || [];
+      const last = o.last_close;
+
+      const day7 = rows.length ? rows[Math.min(rows.length, 7) - 1].pred_close_median : null;
+      const pct = (last && day7) ? ((day7 - last) / last) * 100 : 0;
+
+      const ticker = o.ticker || name;
+      const avgAcc = avgAccuracyForStock(ticker, rows);
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${name}</td>
+        <td>${o.ticker || "—"}</td>
+        <td>₹${formatINR(last)}</td>
+        <td>₹${formatINR(day7)}</td>
+        <td>${pct.toFixed(2)}%</td>
+        <td>${avgAcc == null ? "—" : avgAcc.toFixed(2) + "%"}</td>
+        <td>${o.method || "—"}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // -------------------------
+  // Render selected
+  // -------------------------
+  function extractSeries(stockObj) {
+    const rows = stockObj.forecast || [];
+    const labels = rows.map(r => r.date);
+    return {
+      labels,
+      series: {
+        median: rows.map(r => r.pred_close_median),
+        mean:   rows.map(r => r.pred_close_mean),
+        low68:  rows.map(r => r.low_68),
+        high68: rows.map(r => r.high_68),
+        low95:  rows.map(r => r.low_95),
+        high95: rows.map(r => r.high_95),
+      }
+    };
+  }
+
+  function populateDropdown() {
+    const results = forecastData?.results || {};
+    const keys = Object.keys(results);
+
+    els.stockSelect.innerHTML = "";
+    keys.forEach(k => {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = `${k} (${results[k].ticker || ""})`;
+      els.stockSelect.appendChild(opt);
+    });
+
+    els.stockSelect.disabled = keys.length === 0;
+    currentKey = keys[0] || null;
+  }
+
+  function renderSelected() {
+    if (!forecastData) return;
+
+    const results = forecastData.results || {};
+    const key = currentKey || Object.keys(results)[0];
+    const stockObj = results[key];
+    if (!stockObj) return;
+
+    currentKey = key;
+    els.stockSelect.value = key;
+
+    const { labels, series } = extractSeries(stockObj);
+
+    els.stockMeta.innerHTML = `
+      <span class="pill"><b>${key}</b> (${stockObj.ticker || "—"})</span>
+      <span class="pill">Last Close: ₹${formatINR(stockObj.last_close)} (${stockObj.last_close_date || "—"})</span>
+      <span class="pill">Method: ${stockObj.method || "—"}</span>
+      <span class="pill">Sims: ${stockObj.n_sims || "—"}</span>
+      ${stockObj.beta != null ? `<span class="pill">Beta: ${stockObj.beta}</span>` : ``}
+    `;
+
+    forecastChart = destroyChart(forecastChart);
+    forecastChart = buildForecastChart(document.getElementById("forecastChart"), labels, series);
+
+    const names = Object.keys(results);
+    const pctMoves = names.map(n => {
+      const o = results[n];
+      const rows = o.forecast || [];
+      if (!rows.length || !o.last_close) return 0;
+      const day7 = rows[Math.min(rows.length, 7) - 1].pred_close_median;
+      return ((day7 - o.last_close) / o.last_close) * 100;
+    });
+
+    moveChart = destroyChart(moveChart);
+    moveChart = buildMoveChart(document.getElementById("moveChart"), names, pctMoves);
+
+    renderForecastTable(key, stockObj);
+    renderSummaryTable(results);
+  }
+
+  // -------------------------
+  // Events
+  // -------------------------
+  els.loadBtn.addEventListener("click", async () => {
+    try {
+      const json = await fetchForecast();
+      forecastData = json;
+
+      const warnList = json.warnings || [];
+      setWarnings(warnList.length ? ("Warnings:\n- " + warnList.join("\n- ")) : "");
+      setStatus("Loaded ✓");
+
+      populateDropdown();
+      renderSelected();
+    } catch (e) {
+      setStatus("");
+      setError(String(e));
+    }
+  });
+
+  els.stockSelect.addEventListener("change", () => {
+    currentKey = els.stockSelect.value;
+    renderSelected();
+  });
+
+  els.clearActualsBtn.addEventListener("click", () => {
+    localStorage.removeItem(STORAGE_KEY);
+    renderSelected();
+  });
+
+  // Auto-load
+  els.loadBtn.click();
+</script>
+</body>
+</html>
